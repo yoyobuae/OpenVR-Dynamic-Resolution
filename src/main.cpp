@@ -44,60 +44,6 @@ int vramOnlyMode = 0;
 int preferReprojection = 0;
 int ignoreCpuTime = 0;
 
-// NVML stuff
-typedef enum nvmlReturn_enum
-{
-	NVML_SUCCESS = 0,					// The operation was successful.
-	NVML_ERROR_UNINITIALIZED = 1,		// NVML was not first initialized with nvmlInit.
-	NVML_ERROR_INVALID_ARGUMENT = 2,	// A supplied argument is invalid.
-	NVML_ERROR_NOT_SUPPORTED = 3,		// The requested operation is not available on target device.
-	NVML_ERROR_NO_PERMISSION = 4,		// The currrent user does not have permission for operation.
-	NVML_ERROR_ALREADY_INITIALIZED = 5, // NVML has already been initialized.
-	NVML_ERROR_NOT_FOUND = 6,			// A query to find an object was unccessful.
-	NVML_ERROR_UNKNOWN = 7,				// An internal driver error occurred.
-} nvmlReturn_t;
-typedef nvmlReturn_t (*nvmlInit_t)();
-typedef nvmlReturn_t (*nvmlShutdown_t)();
-typedef struct
-{
-	unsigned long long total;
-	unsigned long long free;
-	unsigned long long used;
-} nvmlMemory_t;
-typedef nvmlReturn_t (*nvmlDevice_t)();
-typedef nvmlReturn_t (*nvmlDeviceGetHandleByIndex_t)(unsigned int, nvmlDevice_t *);
-typedef nvmlReturn_t (*nvmlDeviceGetMemoryInfo_t)(nvmlDevice_t, nvmlMemory_t *);
-#ifdef _WIN32
-typedef HMODULE(nvmlLib);
-#else
-typedef void *(nvmlLib);
-#endif
-
-nvmlDevice_t nvmlDevice;
-
-float getVramUsage(nvmlLib nvmlLibrary)
-{
-	if (!vramMonitorEnabled || !nvmlLibrary)
-		return 0.0f;
-
-	nvmlReturn_t result;
-	nvmlMemory_t memoryInfo;
-	unsigned int deviceCount;
-
-	// Get memory info
-	nvmlDeviceGetMemoryInfo_t nvmlDeviceGetMemoryInfoPtr;
-#ifdef _WIN32
-	nvmlDeviceGetMemoryInfoPtr = (nvmlDeviceGetMemoryInfo_t)GetProcAddress(nvmlLibrary, "nvmlDeviceGetMemoryInfo");
-#else
-	nvmlDeviceGetMemoryInfoPtr = (nvmlDeviceGetMemoryInfo_t)dlsym(nvmlLibrary, "nvmlDeviceGetMemoryInfo");
-#endif
-	result = nvmlDeviceGetMemoryInfoPtr(nvmlDevice, &memoryInfo);
-	if (result != NVML_SUCCESS)
-		return -result;
-
-	// Return VRAM usage as a percentage
-	return (float)memoryInfo.used / (float)memoryInfo.total;
-}
 
 bool loadSettings()
 {
@@ -145,11 +91,6 @@ long getCurrentTimeMillis()
 
 int main(int argc, char *argv[])
 {
-#ifdef _WIN32
-	HMODULE nvmlLibrary = LoadLibraryA("nvml.dll");
-#else
-	void *nvmlLibrary = dlopen("libnvidia-ml.so", RTLD_LAZY);
-#endif
 
 	int rows, cols;		 // max rows and cols
 	initscr();			 // Initialize screen
@@ -211,49 +152,6 @@ int main(int argc, char *argv[])
 	vr::VRSettings()->SetFloat(vr::k_pch_SteamVR_Section,
 							   vr::k_pch_SteamVR_SupersampleScale_Float, initialRes);
 
-	// Initialise NVML
-	nvmlInit_t nvmlInitPtr;
-#ifdef _WIN32
-	nvmlInitPtr = (nvmlInit_t)GetProcAddress(nvmlLibrary, "nvmlInit");
-#else
-	nvmlInitPtr = (nvmlInit_t)dlsym(nvmlLibrary, "nvmlShutdown");
-#endif
-	if (!nvmlInitPtr)
-		vramMonitorEnabled = 0;
-	if (vramMonitorEnabled)
-	{
-		nvmlReturn_t result;
-		// Initialize NVML library
-		result = nvmlInitPtr();
-		if (result != NVML_SUCCESS)
-			vramMonitorEnabled = 0;
-
-		// Get device handle
-		nvmlDeviceGetHandleByIndex_t nvmlDeviceGetHandleByIndexPtr;
-#ifdef _WIN32
-		nvmlDeviceGetHandleByIndexPtr = (nvmlDeviceGetHandleByIndex_t)GetProcAddress(nvmlLibrary, "nvmlDeviceGetHandleByIndex");
-#else
-		nvmlDeviceGetHandleByIndexPtr = (nvmlDeviceGetHandleByIndex_t)dlsym(nvmlLibrary, "nvmlDeviceGetHandleByIndex");
-#endif
-		if (!nvmlDeviceGetHandleByIndexPtr)
-			vramMonitorEnabled = 0;
-		else
-			result = nvmlDeviceGetHandleByIndexPtr(0, &nvmlDevice);
-		if (result != NVML_SUCCESS || !vramMonitorEnabled)
-		{
-			nvmlShutdown_t nvmlShutdownPtr;
-#ifdef _WIN32
-			nvmlShutdownPtr = (nvmlShutdown_t)GetProcAddress(nvmlLibrary, "nvmlShutdown");
-#else
-			nvmlShutdownPtr = (nvmlShutdown_t)dlsym(nvmlLibrary, "nvmlShutdown");
-#endif
-			vramMonitorEnabled = 0;
-			if (nvmlShutdownPtr)
-			{
-				nvmlShutdownPtr();
-			}
-		}
-	}
 
 	// Initialize loop variables
 	long lastChangeTime = getCurrentTimeMillis();
@@ -325,7 +223,7 @@ int main(int argc, char *argv[])
 		}
 
 		// Get VRAM usage
-		float vramUsage = getVramUsage(nvmlLibrary);
+		float vramUsage = 0.0;
 
 		// Resolution handling
 		if (currentTime - resChangeDelayMs > lastChangeTime)
@@ -477,22 +375,6 @@ int main(int argc, char *argv[])
 	}
 
 	// TODO actually be able to get out of the while loop
-
-#ifdef _WIN32
-	nvmlShutdown_t nvmlShutdownPtr = (nvmlShutdown_t)GetProcAddress(nvmlLibrary, "nvmlShutdown");
-	if (nvmlShutdownPtr)
-	{
-		nvmlShutdownPtr();
-	}
-	FreeLibrary(nvmlLibrary);
-#else
-	nvmlShutdown_t nvmlShutdownPtr = (nvmlShutdown_t)dlsym(nvmlLibrary, "nvmlShutdown");
-	if (nvmlShutdownPtr)
-	{
-		nvmlShutdownPtr();
-	}
-	dlclose(nvmlLibrary);
-#endif
 
 	return 0;
 }

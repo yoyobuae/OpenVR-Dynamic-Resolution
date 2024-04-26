@@ -1,4 +1,5 @@
 #include <openvr.h>
+#include <algorithm>
 #include <chrono>
 #include <thread>
 #include <fmt/core.h>
@@ -190,7 +191,7 @@ int main(int argc, char *argv[])
 
 		// Adjust the CPU time off GPU reprojection.
 		float realCpuTime = cpuTime;
-		cpuTime *= std::min(frameShown, floor(gpuTime / targetFrametime) + 1);
+		cpuTime *= std::min((double)frameShown, floor(gpuTime / targetFrametime) + 1);
 
 		// Calculate average GPU frametime
 		gpuTimes.push_front(gpuTime);
